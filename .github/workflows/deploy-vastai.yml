@@ -1,0 +1,192 @@
+name: Deploy CDF STT (Vast.ai)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'api/**'
+      - 'app/**'
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - '.github/workflows/deploy-vastai.yml'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+  deploy-vastai:
+    name: Deploy to Vast.ai
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Vast.ai CLI
+        run: |
+          wget https://raw.githubusercontent.com/vast-ai/vast-python/master/vast.py
+          chmod +x vast.py
+          sudo mv vast.py /usr/local/bin/vast
+
+      - name: Configure Vast.ai API
+        run: |
+          vast set api-key ${{ secrets.VASTAI_API_KEY }}
+
+      - name: Search for RTX 4090 instances
+        id: search
+        run: |
+          echo "Searching for available RTX 4090 instances..."
+          vast search offers 'gpu_name=RTX 4090 num_gpus=1 disk_space>=50 reliability>0.95' --raw > offers.json
+
+          # Get the cheapest offer
+          OFFER_ID=$(jq -r 'sort_by(.dph_total) | .[0].id' offers.json)
+          echo "Selected offer ID: $OFFER_ID"
+          echo "offer_id=$OFFER_ID" >> $GITHUB_OUTPUT
+
+      - name: Create or Update Instance
+        id: deploy
+        run: |
+          # Check if instance already exists
+          EXISTING_INSTANCE=$(vast show instances --raw | jq -r '.[] | select(.label=="cdf-stt-prod") | .id' || echo "")
+
+          if [ -n "$EXISTING_INSTANCE" ]; then
+            echo "Updating existing instance: $EXISTING_INSTANCE"
+            vast destroy instance $EXISTING_INSTANCE
+            sleep 5
+          fi
+
+          echo "Creating new instance..."
+          INSTANCE_ID=$(vast create instance ${{ steps.search.outputs.offer_id }} \
+            --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            --disk 50 \
+            --label cdf-stt-prod \
+            --env "WHISPER_MODEL_SIZE=large-v3" \
+            --env "WHISPER_DEVICE=cuda" \
+            --env "WHISPER_COMPUTE_TYPE=float16" \
+            --ports 8000:8000 \
+            --raw | jq -r '.new_contract')
+
+          echo "Instance created: $INSTANCE_ID"
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+
+      - name: Wait for Instance to be Ready
+        run: |
+          echo "Waiting for instance to be ready..."
+          for i in {1..60}; do
+            STATUS=$(vast show instances --raw | jq -r '.[] | select(.id==${{ steps.deploy.outputs.instance_id }}) | .actual_status')
+
+            if [ "$STATUS" == "running" ]; then
+              echo "Instance is running!"
+              break
+            fi
+
+            echo "Attempt $i/60: Instance status is $STATUS, waiting..."
+            sleep 10
+          done
+
+      - name: Get Instance Connection Info
+        id: connection
+        run: |
+          INSTANCE_INFO=$(vast show instances --raw | jq -r '.[] | select(.id==${{ steps.deploy.outputs.instance_id }})')
+          PUBLIC_IP=$(echo $INSTANCE_INFO | jq -r '.public_ipaddr')
+          SSH_HOST=$(echo $INSTANCE_INFO | jq -r '.ssh_host')
+          SSH_PORT=$(echo $INSTANCE_INFO | jq -r '.ssh_port')
+
+          echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
+          echo "ssh_host=$SSH_HOST" >> $GITHUB_OUTPUT
+          echo "ssh_port=$SSH_PORT" >> $GITHUB_OUTPUT
+
+      - name: Health Check
+        run: |
+          echo "Waiting for API to be healthy..."
+          for i in {1..30}; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${{ steps.connection.outputs.public_ip }}:8000/health || echo "000")
+
+            if [ "$HTTP_CODE" == "200" ]; then
+              echo "API is healthy!"
+              curl http://${{ steps.connection.outputs.public_ip }}:8000/health | jq .
+              break
+            fi
+
+            echo "Attempt $i/30: Health check returned $HTTP_CODE, waiting..."
+            sleep 10
+          done
+
+  deployment-summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [build-and-push, deploy-vastai]
+    if: always()
+
+    steps:
+      - name: Deployment Status
+        run: |
+          echo "=================================================="
+          echo "CDF STT Deployment Summary"
+          echo "=================================================="
+          echo ""
+          echo "Build: ${{ needs.build-and-push.result }}"
+          echo "Deploy: ${{ needs.deploy-vastai.result }}"
+          echo ""
+          echo "Image: ${{ needs.build-and-push.outputs.image_tag }}"
+          echo ""
+          if [ "${{ needs.build-and-push.result }}" = "success" ] && [ "${{ needs.deploy-vastai.result }}" = "success" ]; then
+            echo "✓ Deployment completed successfully!"
+            echo ""
+            echo "Access the API:"
+            echo "vast show instances"
+          else
+            echo "✗ Deployment failed - check logs above"
+          fi
+          echo ""
+          echo "=================================================="

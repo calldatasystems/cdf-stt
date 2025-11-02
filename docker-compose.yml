@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  stt-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cdf-stt-api
+    ports:
+      - "8000:8000"
+    environment:
+      - WHISPER_MODEL_SIZE=large-v3
+      - WHISPER_DEVICE=cuda
+      - WHISPER_COMPUTE_TYPE=float16
+    volumes:
+      # Mount model cache to persist downloads
+      - model-cache:/root/.cache/huggingface
+      # Mount audio samples for testing (optional)
+      - ./test_samples:/app/test_samples:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  model-cache:
+    driver: local
