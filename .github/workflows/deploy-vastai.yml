@@ -86,7 +86,13 @@ jobs:
         id: search
         run: |
           echo "Searching for available RTX 4090 instances..."
-          vast search offers 'gpu_name=RTX 4090 num_gpus=1 disk_space>=50 reliability>0.95' --raw > offers.json
+          vast search offers 'reliability > 0.95 num_gpus=1 disk_space >= 50 gpu_name=RTX_4090' --raw > offers.json
+
+          # Check if we got any results
+          if [ ! -s offers.json ] || [ "$(cat offers.json)" = "[]" ]; then
+            echo "No RTX 4090 instances available, searching for any RTX 40-series..."
+            vast search offers 'reliability > 0.95 num_gpus=1 disk_space >= 50 gpu_ram >= 16' --raw > offers.json
+          fi
 
           # Get the cheapest offer
           OFFER_ID=$(jq -r 'sort_by(.dph_total) | .[0].id' offers.json)
