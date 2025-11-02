@@ -103,7 +103,7 @@ jobs:
         id: deploy
         run: |
           # Check if instance already exists
-          EXISTING_INSTANCE=$(vast show instances --raw | jq -r '.[] | select(.label=="cdf-stt-prod") | .id' || echo "")
+          EXISTING_INSTANCE=$(vast show instances --raw | jq -r '.[] | select(.label=="cdf-stt-prod") | .id' 2>/dev/null || echo "")
 
           if [ -n "$EXISTING_INSTANCE" ]; then
             echo "Updating existing instance: $EXISTING_INSTANCE"
@@ -111,42 +111,71 @@ jobs:
             sleep 5
           fi
 
-          echo "Creating new instance..."
-          INSTANCE_ID=$(vast create instance ${{ steps.search.outputs.offer_id }} \
+          echo "Creating new instance with offer ID: ${{ steps.search.outputs.offer_id }}"
+
+          # Create instance and capture full output for debugging
+          CREATE_OUTPUT=$(vast create instance ${{ steps.search.outputs.offer_id }} \
             --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
             --disk 50 \
             --label cdf-stt-prod \
-            --env "WHISPER_MODEL_SIZE=large-v3" \
-            --env "WHISPER_DEVICE=cuda" \
-            --env "WHISPER_COMPUTE_TYPE=float16" \
-            --ports 8000:8000 \
-            --raw | jq -r '.new_contract')
+            --env WHISPER_MODEL_SIZE=large-v3 \
+            --env WHISPER_DEVICE=cuda \
+            --env WHISPER_COMPUTE_TYPE=float16 \
+            --onstart-cmd "uvicorn api.main:app --host 0.0.0.0 --port 8000" \
+            --raw 2>&1)
 
-          echo "Instance created: $INSTANCE_ID"
+          echo "Create output: $CREATE_OUTPUT"
+
+          # Extract instance ID - try multiple fields
+          INSTANCE_ID=$(echo "$CREATE_OUTPUT" | jq -r '.new_contract // .instance_id // .id' 2>/dev/null || echo "")
+
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "null" ]; then
+            echo "ERROR: Failed to get instance ID from create response"
+            echo "Full response: $CREATE_OUTPUT"
+            exit 1
+          fi
+
+          echo "Instance created with ID: $INSTANCE_ID"
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
 
       - name: Wait for Instance to be Ready
         run: |
-          echo "Waiting for instance to be ready..."
-          for i in {1..60}; do
-            STATUS=$(vast show instances --raw | jq -r '.[] | select(.id==${{ steps.deploy.outputs.instance_id }}) | .actual_status')
+          INSTANCE_ID="${{ steps.deploy.outputs.instance_id }}"
+          echo "Waiting for instance $INSTANCE_ID to be ready..."
 
-            if [ "$STATUS" == "running" ]; then
+          for i in {1..60}; do
+            STATUS=$(vast show instances --raw 2>/dev/null | jq -r --arg id "$INSTANCE_ID" '.[] | select(.id==($id|tonumber)) | .actual_status' || echo "unknown")
+
+            echo "Attempt $i/60: Instance status is '$STATUS'"
+
+            if [ "$STATUS" = "running" ]; then
               echo "Instance is running!"
               break
             fi
 
-            echo "Attempt $i/60: Instance status is $STATUS, waiting..."
+            if [ $i -eq 60 ]; then
+              echo "Timeout waiting for instance to start"
+              exit 1
+            fi
+
             sleep 10
           done
 
       - name: Get Instance Connection Info
         id: connection
         run: |
-          INSTANCE_INFO=$(vast show instances --raw | jq -r '.[] | select(.id==${{ steps.deploy.outputs.instance_id }})')
-          PUBLIC_IP=$(echo $INSTANCE_INFO | jq -r '.public_ipaddr')
-          SSH_HOST=$(echo $INSTANCE_INFO | jq -r '.ssh_host')
-          SSH_PORT=$(echo $INSTANCE_INFO | jq -r '.ssh_port')
+          INSTANCE_ID="${{ steps.deploy.outputs.instance_id }}"
+          INSTANCE_INFO=$(vast show instances --raw 2>/dev/null | jq -r --arg id "$INSTANCE_ID" '.[] | select(.id==($id|tonumber))')
+
+          echo "Instance info: $INSTANCE_INFO"
+
+          PUBLIC_IP=$(echo "$INSTANCE_INFO" | jq -r '.public_ipaddr // "unknown"')
+          SSH_HOST=$(echo "$INSTANCE_INFO" | jq -r '.ssh_host // "unknown"')
+          SSH_PORT=$(echo "$INSTANCE_INFO" | jq -r '.ssh_port // "unknown"')
+
+          echo "Public IP: $PUBLIC_IP"
+          echo "SSH Host: $SSH_HOST"
+          echo "SSH Port: $SSH_PORT"
 
           echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
           echo "ssh_host=$SSH_HOST" >> $GITHUB_OUTPUT
