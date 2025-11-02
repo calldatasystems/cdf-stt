@@ -12,6 +12,15 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     python3.11-dev \
     ffmpeg \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libavdevice-dev \
+    libavfilter-dev \
+    libswscale-dev \
+    libswresample-dev \
+    pkg-config \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Python 3.11 as default
