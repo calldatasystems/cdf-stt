@@ -114,8 +114,8 @@ jobs:
           echo "Creating new instance with offer ID: ${{ steps.search.outputs.offer_id }}"
           echo "Using image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
 
-          # Create instance - Vast.ai automatically maps EXPOSE ports from Dockerfile
-          # Let Docker CMD run naturally - don't override with --onstart-cmd
+          # Create instance with onstart command to launch the service
+          # SSH mode requires explicit onstart command to run the application
           set +e  # Don't exit on error, capture it
           CREATE_OUTPUT=$(vast create instance ${{ steps.search.outputs.offer_id }} \
             --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
@@ -123,6 +123,7 @@ jobs:
             --label cdf-stt-prod \
             --ssh \
             --env '-e WHISPER_MODEL_SIZE=large-v3 -e WHISPER_DEVICE=cuda -e WHISPER_COMPUTE_TYPE=float16' \
+            --onstart-cmd 'cd /app && uvicorn api.main:app --host 0.0.0.0 --port 8000' \
             --raw 2>&1)
           CREATE_EXIT_CODE=$?
           set -e  # Re-enable exit on error
