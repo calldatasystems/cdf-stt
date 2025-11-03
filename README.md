@@ -128,3 +128,4 @@ curl -X POST http://your-vastai-instance:8000/transcribe \
 ## License
 
 MIT
+# Trigger deployment
