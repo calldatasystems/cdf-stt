@@ -3,16 +3,20 @@ fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 
-# PyTorch for CUDA support (required by faster-whisper)
+# PyTorch for CUDA support (required by whisperx and faster-whisper)
 torch==2.1.2
 torchaudio==2.1.2
 
-# Faster-Whisper for STT
-faster-whisper==1.0.0
+# WhisperX for STT with diarization and alignment
+whisperx==3.1.1
+
+# Diarization model (required by WhisperX)
+pyannote.audio==3.1.1
 
 # Audio processing
 pydub==0.25.1
 librosa==0.10.1
+soundfile==0.12.1
 
 # NumPy - pin to 1.x for compatibility with audio processing libs
 numpy<2.0.0

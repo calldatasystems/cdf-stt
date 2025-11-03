@@ -1,19 +1,20 @@
 """
-Faster-Whisper STT Service Wrapper
-Provides thread-safe interface to Faster-Whisper model
+WhisperX STT Service Wrapper with Diarization
+Provides thread-safe interface to WhisperX model with speaker diarization
 """
 
 import logging
+import os
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 import torch
-from faster_whisper import WhisperModel
+import whisperx
 
 logger = logging.getLogger(__name__)
 
 
 class WhisperSTTService:
-    """Thread-safe Faster-Whisper service wrapper"""
+    """Thread-safe WhisperX service wrapper with diarization support"""
 
     def __init__(
         self,
@@ -23,7 +24,7 @@ class WhisperSTTService:
         download_root: Optional[str] = None
     ):
         """
-        Initialize Faster-Whisper model
+        Initialize WhisperX model with diarization support
 
         Args:
             model_size: Model size (tiny, base, small, medium, large-v2, large-v3)
@@ -35,16 +36,25 @@ class WhisperSTTService:
         self.device = device
         self.compute_type = compute_type
 
-        logger.info(f"Loading Faster-Whisper model: {model_size} on {device}")
+        # Get HuggingFace token for diarization model
+        self.hf_token = os.getenv("HF_TOKEN")
+        if not self.hf_token:
+            logger.warning("HF_TOKEN not set. Diarization will be disabled. Get token from https://huggingface.co/settings/tokens")
+
+        logger.info(f"Loading WhisperX model: {model_size} on {device}")
 
         try:
-            self.model = WhisperModel(
+            self.model = whisperx.load_model(
                 model_size,
                 device=device,
                 compute_type=compute_type,
                 download_root=download_root
             )
-            logger.info("Model loaded successfully")
+            logger.info("WhisperX model loaded successfully")
+
+            # Diarization model will be loaded on-demand
+            self.diarization_model = None
+
         except Exception as e:
             logger.error(f"Failed to load model: {e}")
             raise
@@ -56,10 +66,13 @@ class WhisperSTTService:
         task: str = "transcribe",
         beam_size: int = 5,
         vad_filter: bool = True,
-        word_timestamps: bool = False
+        word_timestamps: bool = False,
+        enable_diarization: bool = False,
+        min_speakers: Optional[int] = None,
+        max_speakers: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        Transcribe audio file
+        Transcribe audio file with optional speaker diarization
 
         Args:
             audio_path: Path to audio file
@@ -68,58 +81,127 @@ class WhisperSTTService:
             beam_size: Beam size for decoding
             vad_filter: Use voice activity detection to filter silence
             word_timestamps: Include word-level timestamps
+            enable_diarization: Enable speaker diarization
+            min_speakers: Minimum number of speakers (for diarization)
+            max_speakers: Maximum number of speakers (for diarization)
 
         Returns:
-            Dict with transcription results
+            Dict with transcription results and speaker labels if diarization enabled
         """
         try:
-            logger.info(f"Transcribing: {audio_path}")
+            logger.info(f"Transcribing: {audio_path} (diarization={enable_diarization})")
 
-            segments, info = self.model.transcribe(
-                audio_path,
+            # Load audio
+            audio = whisperx.load_audio(audio_path)
+
+            # Step 1: Transcribe with Whisper
+            result = self.model.transcribe(
+                audio,
                 language=language,
-                task=task,
-                beam_size=beam_size,
-                vad_filter=vad_filter,
-                word_timestamps=word_timestamps
+                batch_size=16  # WhisperX uses batch processing
             )
 
-            # Convert generator to list and extract data
+            detected_language = result["language"]
+            logger.info(f"Detected language: {detected_language}")
+
+            # Step 2: Align whisper output (get word-level timestamps)
+            logger.info("Aligning transcription for word-level timestamps...")
+            model_a, metadata = whisperx.load_align_model(
+                language_code=detected_language,
+                device=self.device
+            )
+            result = whisperx.align(
+                result["segments"],
+                model_a,
+                metadata,
+                audio,
+                self.device,
+                return_char_alignments=False
+            )
+
+            # Step 3: Diarization (if enabled and HF token available)
+            speakers_info = None
+            if enable_diarization and self.hf_token:
+                logger.info("Performing speaker diarization...")
+                try:
+                    # Load diarization model (lazy loading)
+                    if self.diarization_model is None:
+                        self.diarization_model = whisperx.DiarizationPipeline(
+                            use_auth_token=self.hf_token,
+                            device=self.device
+                        )
+
+                    # Perform diarization
+                    diarize_segments = self.diarization_model(
+                        audio,
+                        min_speakers=min_speakers,
+                        max_speakers=max_speakers
+                    )
+
+                    # Assign speakers to words
+                    result = whisperx.assign_word_speakers(diarize_segments, result)
+                    speakers_info = {
+                        "enabled": True,
+                        "num_speakers": len(set([s['speaker'] for s in diarize_segments.itertracks(yield_label=True)]))
+                    }
+                    logger.info(f"Diarization complete. Detected {speakers_info['num_speakers']} speakers")
+
+                except Exception as e:
+                    logger.error(f"Diarization failed: {e}")
+                    speakers_info = {"enabled": False, "error": str(e)}
+            elif enable_diarization and not self.hf_token:
+                speakers_info = {"enabled": False, "error": "HF_TOKEN not set"}
+                logger.warning("Diarization requested but HF_TOKEN not available")
+
+            # Format output
             segments_list = []
             full_text = []
 
-            for segment in segments:
+            for segment in result["segments"]:
                 segment_data = {
-                    "start": segment.start,
-                    "end": segment.end,
-                    "text": segment.text.strip()
+                    "start": segment["start"],
+                    "end": segment["end"],
+                    "text": segment["text"].strip()
                 }
 
-                if word_timestamps and hasattr(segment, 'words'):
+                # Add speaker info if available
+                if "speaker" in segment:
+                    segment_data["speaker"] = segment["speaker"]
+
+                # Add word-level data
+                if "words" in segment:
                     segment_data["words"] = [
                         {
-                            "word": word.word,
-                            "start": word.start,
-                            "end": word.end,
-                            "probability": word.probability
+                            "word": word["word"],
+                            "start": word["start"],
+                            "end": word["end"],
+                            "score": word.get("score", 1.0),
+                            "speaker": word.get("speaker")
                         }
-                        for word in segment.words
+                        for word in segment["words"]
                     ]
 
                 segments_list.append(segment_data)
-                full_text.append(segment.text.strip())
+                full_text.append(segment["text"].strip())
 
-            result = {
+            # Calculate duration from segments
+            duration = max([s["end"] for s in segments_list]) if segments_list else 0.0
+
+            response = {
                 "text": " ".join(full_text),
                 "segments": segments_list,
-                "language": info.language,
-                "language_probability": info.language_probability,
-                "duration": info.duration,
-                "model": self.model_size
+                "language": detected_language,
+                "language_probability": 1.0,  # WhisperX doesn't provide this
+                "duration": duration,
+                "model": self.model_size,
+                "word_timestamps": True  # WhisperX always provides word timestamps after alignment
             }
 
-            logger.info(f"Transcription complete. Language: {info.language}, Duration: {info.duration:.2f}s")
-            return result
+            if speakers_info:
+                response["diarization"] = speakers_info
+
+            logger.info(f"Transcription complete. Language: {detected_language}, Duration: {duration:.2f}s")
+            return response
 
         except Exception as e:
             logger.error(f"Transcription failed: {e}")

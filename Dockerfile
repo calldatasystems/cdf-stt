@@ -1,5 +1,5 @@
 # CDF Speech-to-Text Service Dockerfile
-# Multi-stage build for Faster-Whisper with CUDA support
+# Multi-stage build for WhisperX with CUDA support and Diarization
 
 FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu22.04 as base
 
@@ -51,6 +51,8 @@ ENV PYTHONUNBUFFERED=1
 ENV WHISPER_MODEL_SIZE=large-v3
 ENV WHISPER_DEVICE=cuda
 ENV WHISPER_COMPUTE_TYPE=float16
+# Set HF_TOKEN via docker run -e HF_TOKEN=your_token or docker-compose
+ENV HF_TOKEN=""
 
 # Expose API port
 EXPOSE 8000

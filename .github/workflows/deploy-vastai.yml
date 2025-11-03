@@ -122,7 +122,7 @@ jobs:
             --disk 50 \
             --label cdf-stt-prod \
             --ssh \
-            --env '-p 8000:8000/tcp -e WHISPER_MODEL_SIZE=large-v3 -e WHISPER_DEVICE=cuda -e WHISPER_COMPUTE_TYPE=float16' \
+            --env '-p 8000:8000/tcp -e WHISPER_MODEL_SIZE=large-v3 -e WHISPER_DEVICE=cuda -e WHISPER_COMPUTE_TYPE=float16 -e HF_TOKEN=${{ secrets.HF_TOKEN }}' \
             --onstart-cmd 'cd /app && uvicorn api.main:app --host 0.0.0.0 --port 8000' \
             --raw 2>&1)
           CREATE_EXIT_CODE=$?

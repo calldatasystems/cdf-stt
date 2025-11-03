@@ -61,6 +61,8 @@ class TranscriptionResponse(BaseModel):
     segments: list
     model: str
     processing_time: float
+    word_timestamps: bool
+    diarization: Optional[dict] = None
 
 
 class HealthResponse(BaseModel):
@@ -139,13 +141,22 @@ async def transcribe_audio(
     task: str = Form("transcribe", description="Task: 'transcribe' or 'translate' (to English)"),
     beam_size: int = Form(5, description="Beam size for decoding (1-10)"),
     vad_filter: bool = Form(True, description="Use voice activity detection to filter silence"),
-    word_timestamps: bool = Form(False, description="Include word-level timestamps")
+    word_timestamps: bool = Form(False, description="Include word-level timestamps"),
+    enable_diarization: bool = Form(False, description="Enable speaker diarization (requires HF_TOKEN)"),
+    min_speakers: Optional[int] = Form(None, description="Minimum number of speakers for diarization"),
+    max_speakers: Optional[int] = Form(None, description="Maximum number of speakers for diarization")
 ):
     """
-    Transcribe audio file to text
+    Transcribe audio file to text with optional speaker diarization
 
     Upload an audio file and receive transcription with metadata.
     Supports 99+ languages and automatic language detection.
+
+    Speaker Diarization:
+    - Set enable_diarization=true to identify different speakers
+    - Requires HF_TOKEN environment variable (get from https://huggingface.co/settings/tokens)
+    - Returns speaker labels (SPEAKER_00, SPEAKER_01, etc.) for each segment
+    - Optional: Set min_speakers/max_speakers to constrain detection
     """
     if stt_service is None:
         transcription_errors.inc()
@@ -171,7 +182,7 @@ async def transcribe_audio(
 
         logger.info(f"Processing file: {file.filename} ({len(content)} bytes)")
 
-        # Transcribe
+        # Transcribe with optional diarization
         with transcription_duration.time():
             result = stt_service.transcribe(
                 audio_path=temp_file_path,
@@ -179,7 +190,10 @@ async def transcribe_audio(
                 task=task,
                 beam_size=beam_size,
                 vad_filter=vad_filter,
-                word_timestamps=word_timestamps
+                word_timestamps=word_timestamps,
+                enable_diarization=enable_diarization,
+                min_speakers=min_speakers,
+                max_speakers=max_speakers
             )
 
         processing_time = time.time() - start_time

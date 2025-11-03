@@ -12,6 +12,9 @@ services:
       - WHISPER_MODEL_SIZE=large-v3
       - WHISPER_DEVICE=cuda
       - WHISPER_COMPUTE_TYPE=float16
+      - HF_TOKEN=${HF_TOKEN}
+    env_file:
+      - .env
     volumes:
       # Mount model cache to persist downloads
       - model-cache:/root/.cache/huggingface
