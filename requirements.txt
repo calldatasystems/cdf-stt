@@ -3,6 +3,10 @@ fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 
+# PyTorch for CUDA support (required by faster-whisper)
+torch==2.1.2
+torchaudio==2.1.2
+
 # Faster-Whisper for STT
 faster-whisper==1.0.0
 
