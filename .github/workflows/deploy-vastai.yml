@@ -113,7 +113,7 @@ jobs:
 
           echo "Creating new instance with offer ID: ${{ steps.search.outputs.offer_id }}"
 
-          # Create instance and capture full output for debugging
+          # Create instance with port forwarding for 8000
           CREATE_OUTPUT=$(vast create instance ${{ steps.search.outputs.offer_id }} \
             --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
             --disk 50 \
@@ -122,6 +122,9 @@ jobs:
             --env WHISPER_DEVICE=cuda \
             --env WHISPER_COMPUTE_TYPE=float16 \
             --onstart-cmd "uvicorn api.main:app --host 0.0.0.0 --port 8000" \
+            --direct-port-count 1 \
+            --direct-port-start 8000 \
+            --direct-port-end 8000 \
             --raw 2>&1)
 
           echo "Create output: $CREATE_OUTPUT"
@@ -169,31 +172,55 @@ jobs:
 
           echo "Instance info: $INSTANCE_INFO"
 
+          # Extract connection details
           PUBLIC_IP=$(echo "$INSTANCE_INFO" | jq -r '.public_ipaddr // "unknown"')
           SSH_HOST=$(echo "$INSTANCE_INFO" | jq -r '.ssh_host // "unknown"')
           SSH_PORT=$(echo "$INSTANCE_INFO" | jq -r '.ssh_port // "unknown"')
 
+          # Extract port mappings - find the external port that maps to internal 8000
+          # Format in Vast.ai: "ports": {"8000/tcp": [{"HostIp": "0.0.0.0", "HostPort": "12345"}]}
+          EXTERNAL_PORT=$(echo "$INSTANCE_INFO" | jq -r '.ports["8000/tcp"][0].HostPort // "unknown"')
+
+          # Alternative: check direct_port_start if direct port was assigned
+          if [ "$EXTERNAL_PORT" = "unknown" ] || [ -z "$EXTERNAL_PORT" ]; then
+            EXTERNAL_PORT=$(echo "$INSTANCE_INFO" | jq -r '.direct_port_start // "unknown"')
+          fi
+
           echo "Public IP: $PUBLIC_IP"
           echo "SSH Host: $SSH_HOST"
           echo "SSH Port: $SSH_PORT"
+          echo "External Port (for 8000): $EXTERNAL_PORT"
 
           echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
           echo "ssh_host=$SSH_HOST" >> $GITHUB_OUTPUT
           echo "ssh_port=$SSH_PORT" >> $GITHUB_OUTPUT
+          echo "external_port=$EXTERNAL_PORT" >> $GITHUB_OUTPUT
 
       - name: Health Check
         run: |
+          PUBLIC_IP="${{ steps.connection.outputs.public_ip }}"
+          EXTERNAL_PORT="${{ steps.connection.outputs.external_port }}"
+
+          if [ "$PUBLIC_IP" = "unknown" ] || [ "$EXTERNAL_PORT" = "unknown" ]; then
+            echo "Warning: Could not determine connection details"
+            echo "Check Vast.ai console for port mapping: https://vast.ai/console/instances/"
+            exit 0
+          fi
+
+          API_URL="http://${PUBLIC_IP}:${EXTERNAL_PORT}"
+          echo "Testing API at: $API_URL"
           echo "Waiting for API to be healthy..."
+
           for i in {1..30}; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${{ steps.connection.outputs.public_ip }}:8000/health || echo "000")
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_URL}/health" 2>/dev/null || echo "000")
 
             if [ "$HTTP_CODE" == "200" ]; then
-              echo "API is healthy!"
-              curl http://${{ steps.connection.outputs.public_ip }}:8000/health | jq .
+              echo "✓ API is healthy!"
+              curl -s "${API_URL}/health" | jq . || curl -s "${API_URL}/health"
               break
             fi
 
-            echo "Attempt $i/30: Health check returned $HTTP_CODE, waiting..."
+            echo "Attempt $i/30: Health check returned HTTP $HTTP_CODE, waiting..."
             sleep 10
           done
 
@@ -218,10 +245,34 @@ jobs:
           if [ "${{ needs.build-and-push.result }}" = "success" ] && [ "${{ needs.deploy-vastai.result }}" = "success" ]; then
             echo "✓ Deployment completed successfully!"
             echo ""
-            echo "Access the API:"
-            echo "vast show instances"
+            echo "Connection Information:"
+            echo "  Check the 'Get Instance Connection Info' step above for:"
+            echo "  - Public IP"
+            echo "  - External Port (forwarded from internal port 8000)"
+            echo "  - SSH access details"
+            echo ""
+            echo "Quick Access:"
+            echo "  1. View in Vast.ai console: https://vast.ai/console/instances/"
+            echo "  2. Find instance labeled: cdf-stt-prod"
+            echo "  3. Note the port mapping for 8000"
+            echo ""
+            echo "API Endpoints (use PUBLIC_IP:EXTERNAL_PORT):"
+            echo "  - Health: http://IP:PORT/health"
+            echo "  - Docs: http://IP:PORT/docs"
+            echo "  - Transcribe: POST http://IP:PORT/transcribe"
           else
             echo "✗ Deployment failed - check logs above"
+            echo ""
+            if [ "${{ needs.build-and-push.result }}" != "success" ]; then
+              echo "Build failed - check Docker build logs"
+            fi
+            if [ "${{ needs.deploy-vastai.result }}" != "success" ]; then
+              echo "Deployment failed - check Vast.ai deployment logs"
+              echo "Common issues:"
+              echo "  - Insufficient Vast.ai credits"
+              echo "  - No available GPU instances matching criteria"
+              echo "  - Port forwarding configuration"
+            fi
           fi
           echo ""
           echo "=================================================="
