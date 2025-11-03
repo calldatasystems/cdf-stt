@@ -112,9 +112,11 @@ jobs:
           fi
 
           echo "Creating new instance with offer ID: ${{ steps.search.outputs.offer_id }}"
+          echo "Using image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
 
           # Create instance with explicit port mapping
           # Let Docker CMD run naturally - don't override with --onstart-cmd
+          set +e  # Don't exit on error, capture it
           CREATE_OUTPUT=$(vast create instance ${{ steps.search.outputs.offer_id }} \
             --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
             --disk 50 \
@@ -123,8 +125,17 @@ jobs:
             -p 8000:8000 \
             --env '-e WHISPER_MODEL_SIZE=large-v3 -e WHISPER_DEVICE=cuda -e WHISPER_COMPUTE_TYPE=float16' \
             --raw 2>&1)
+          CREATE_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
 
+          echo "Create command exit code: $CREATE_EXIT_CODE"
           echo "Create output: $CREATE_OUTPUT"
+
+          if [ $CREATE_EXIT_CODE -ne 0 ]; then
+            echo "ERROR: vast create instance failed with exit code $CREATE_EXIT_CODE"
+            echo "Full output: $CREATE_OUTPUT"
+            exit $CREATE_EXIT_CODE
+          fi
 
           # Extract instance ID - try multiple fields
           INSTANCE_ID=$(echo "$CREATE_OUTPUT" | jq -r '.new_contract // .instance_id // .id' 2>/dev/null || echo "")
