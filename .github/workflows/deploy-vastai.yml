@@ -113,7 +113,7 @@ jobs:
 
           echo "Creating new instance with offer ID: ${{ steps.search.outputs.offer_id }}"
 
-          # Create instance with port forwarding for 8000
+          # Create instance - Vast.ai will automatically forward ports
           CREATE_OUTPUT=$(vast create instance ${{ steps.search.outputs.offer_id }} \
             --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
             --disk 50 \
@@ -122,9 +122,6 @@ jobs:
             --env WHISPER_DEVICE=cuda \
             --env WHISPER_COMPUTE_TYPE=float16 \
             --onstart-cmd "uvicorn api.main:app --host 0.0.0.0 --port 8000" \
-            --direct-port-count 1 \
-            --direct-port-start 8000 \
-            --direct-port-end 8000 \
             --raw 2>&1)
 
           echo "Create output: $CREATE_OUTPUT"
