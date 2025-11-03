@@ -143,17 +143,31 @@ jobs:
           echo "Waiting for instance $INSTANCE_ID to be ready..."
 
           for i in {1..60}; do
-            STATUS=$(vast show instances --raw 2>/dev/null | jq -r --arg id "$INSTANCE_ID" '.[] | select(.id==($id|tonumber)) | .actual_status' || echo "unknown")
+            INSTANCE_INFO=$(vast show instances --raw 2>/dev/null | jq -r --arg id "$INSTANCE_ID" '.[] | select(.id==($id|tonumber))')
+            STATUS=$(echo "$INSTANCE_INFO" | jq -r '.actual_status // "unknown"')
 
             echo "Attempt $i/60: Instance status is '$STATUS'"
 
-            if [ "$STATUS" = "running" ]; then
-              echo "Instance is running!"
+            # Debug: Show full instance info on every 10th attempt
+            if [ $((i % 10)) -eq 0 ]; then
+              echo "Full instance info:"
+              echo "$INSTANCE_INFO" | jq '.'
+            fi
+
+            # Accept both 'running' and 'created' as valid states
+            # Vast.ai sometimes shows 'created' when container is actually running
+            if [ "$STATUS" = "running" ] || [ "$STATUS" = "created" ]; then
+              echo "Instance is ready (status: $STATUS)"
+              # Give it a few more seconds to stabilize
+              sleep 5
               break
             fi
 
             if [ $i -eq 60 ]; then
               echo "Timeout waiting for instance to start"
+              echo "Final status: $STATUS"
+              echo "Full instance info:"
+              echo "$INSTANCE_INFO" | jq '.'
               exit 1
             fi
 
