@@ -116,14 +116,14 @@ jobs:
 
           # Create instance with explicit port mapping
           # Let Docker CMD run naturally - don't override with --onstart-cmd
+          # Port mapping must be inside --env flag per Vast.ai CLI syntax
           set +e  # Don't exit on error, capture it
           CREATE_OUTPUT=$(vast create instance ${{ steps.search.outputs.offer_id }} \
             --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
             --disk 50 \
             --label cdf-stt-prod \
             --ssh \
-            -p 8000:8000 \
-            --env '-e WHISPER_MODEL_SIZE=large-v3 -e WHISPER_DEVICE=cuda -e WHISPER_COMPUTE_TYPE=float16' \
+            --env '-p 8000:8000 -e WHISPER_MODEL_SIZE=large-v3 -e WHISPER_DEVICE=cuda -e WHISPER_COMPUTE_TYPE=float16' \
             --raw 2>&1)
           CREATE_EXIT_CODE=$?
           set -e  # Re-enable exit on error
