@@ -4,8 +4,8 @@ uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 
 # PyTorch for CUDA support (required by whisperx and faster-whisper)
-torch==2.1.2
-torchaudio==2.1.2
+torch==2.2.0
+torchaudio==2.2.0
 
 # WhisperX for STT with diarization and alignment
 whisperx==3.1.1
