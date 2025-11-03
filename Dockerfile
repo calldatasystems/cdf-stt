@@ -1,7 +1,7 @@
 # CDF Speech-to-Text Service Dockerfile
 # Multi-stage build for Faster-Whisper with CUDA support
 
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04 as base
+FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu22.04 as base
 
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
