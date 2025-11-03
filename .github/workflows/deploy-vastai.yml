@@ -120,7 +120,7 @@ jobs:
             --label cdf-stt-prod \
             --ssh \
             --env '-e WHISPER_MODEL_SIZE=large-v3 -e WHISPER_DEVICE=cuda -e WHISPER_COMPUTE_TYPE=float16' \
-            --onstart-cmd "mkdir -p /root/.ssh && echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJOSGI81n0MDEMZcJ6ceky/u9MBQu3yqHHa0Ja0NcNvs aqorn@ALIENWARE' >> /root/.ssh/authorized_keys && chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys && cd /app && uvicorn api.main:app --host 0.0.0.0 --port 8000" \
+            --onstart-cmd "cd /app && uvicorn api.main:app --host 0.0.0.0 --port 8000" \
             --raw 2>&1)
 
           echo "Create output: $CREATE_OUTPUT"
