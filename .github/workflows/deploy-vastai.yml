@@ -133,7 +133,7 @@ jobs:
           echo "Using image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
 
           # Create instance with onstart command and port mapping
-          # Port mapping via --env per Vast.ai documentation
+          # Port mapping and environment variables passed separately
           # Disk parameter re-added - now searching for hosts with good storage support
           set +e  # Don't exit on error, capture it
           CREATE_OUTPUT=$(vast create instance ${{ steps.search.outputs.offer_id }} \
@@ -141,7 +141,11 @@ jobs:
             --disk 50 \
             --label cdf-stt-prod \
             --ssh \
-            --env '-p 8000:8000/tcp -e WHISPER_MODEL_SIZE=large-v3 -e WHISPER_DEVICE=cuda -e WHISPER_COMPUTE_TYPE=float16 -e HF_TOKEN=${{ secrets.HF_TOKEN }}' \
+            -p 8000:8000/tcp \
+            --env WHISPER_MODEL_SIZE=large-v3 \
+            --env WHISPER_DEVICE=cuda \
+            --env WHISPER_COMPUTE_TYPE=float16 \
+            --env HF_TOKEN=${{ secrets.HF_TOKEN }} \
             --onstart-cmd 'cd /app && uvicorn api.main:app --host 0.0.0.0 --port 8000' \
             --raw 2>&1)
           CREATE_EXIT_CODE=$?
