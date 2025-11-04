@@ -146,6 +146,7 @@ jobs:
             --label cdf-stt-prod \
             --ssh \
             --env "-p 8000:8000/tcp -e WHISPER_MODEL_SIZE=large-v3 -e WHISPER_DEVICE=cuda -e WHISPER_COMPUTE_TYPE=float16 -e HF_TOKEN=${HF_TOKEN_VALUE}" \
+            --onstart-cmd 'nohup bash -c "cd /app && uvicorn api.main:app --host 0.0.0.0 --port 8000 > /tmp/stt.log 2>&1 &"' \
             --raw 2>&1)
           CREATE_EXIT_CODE=$?
           set -e  # Re-enable exit on error
