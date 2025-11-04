@@ -116,10 +116,10 @@ jobs:
 
           # Create instance with onstart command and port mapping
           # Port mapping via --env per Vast.ai documentation
+          # Note: --disk removed to avoid storage-opt errors on some hosts
           set +e  # Don't exit on error, capture it
           CREATE_OUTPUT=$(vast create instance ${{ steps.search.outputs.offer_id }} \
             --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            --disk 50 \
             --label cdf-stt-prod \
             --ssh \
             --env '-p 8000:8000/tcp -e WHISPER_MODEL_SIZE=large-v3 -e WHISPER_DEVICE=cuda -e WHISPER_COMPUTE_TYPE=float16 -e HF_TOKEN=${{ secrets.HF_TOKEN }}' \
@@ -153,15 +153,30 @@ jobs:
         run: |
           INSTANCE_ID="${{ steps.deploy.outputs.instance_id }}"
           echo "Waiting for instance $INSTANCE_ID to be ready..."
+          echo "Note: First deployment may take 5-10 minutes to pull Docker image"
 
-          for i in {1..120}; do
+          for i in {1..180}; do
             INSTANCE_INFO=$(vast show instances --raw 2>/dev/null | jq -r --arg id "$INSTANCE_ID" '.[] | select(.id==($id|tonumber))')
             STATUS=$(echo "$INSTANCE_INFO" | jq -r '.actual_status // "unknown"')
+            STATUS_MSG=$(echo "$INSTANCE_INFO" | jq -r '.status_msg // "none"')
 
-            echo "Attempt $i/120: Instance status is '$STATUS'"
+            echo "Attempt $i/180: Instance status is '$STATUS'"
 
-            # Debug: Show full instance info on every 10th attempt
-            if [ $((i % 10)) -eq 0 ]; then
+            # Show status message if there's an error
+            if [ "$STATUS_MSG" != "none" ] && [ "$STATUS_MSG" != "" ]; then
+              echo "Status message: $STATUS_MSG"
+
+              # Check for known errors that indicate we should fail fast
+              if echo "$STATUS_MSG" | grep -q "storage-opt"; then
+                echo "ERROR: Host has storage configuration issues"
+                echo "Destroying instance and exiting - please retry (will select different host)"
+                vast destroy instance $INSTANCE_ID || true
+                exit 1
+              fi
+            fi
+
+            # Debug: Show full instance info on every 15th attempt
+            if [ $((i % 15)) -eq 0 ]; then
               echo "Full instance info:"
               echo "$INSTANCE_INFO" | jq '.'
             fi
@@ -173,16 +188,17 @@ jobs:
             if [ "$STATUS" = "running" ] || [ "$STATUS" = "created" ]; then
               echo "Instance is ready (status: $STATUS)"
               # Give it more time to fully initialize
-              sleep 15
+              sleep 20
               break
             elif [ "$STATUS" = "loading" ]; then
               echo "Instance is loading (pulling/building Docker image)..."
               # Continue waiting, this is expected for first deployment
             fi
 
-            if [ $i -eq 120 ]; then
-              echo "Timeout waiting for instance to start"
+            if [ $i -eq 180 ]; then
+              echo "Timeout waiting for instance to start after 30 minutes"
               echo "Final status: $STATUS"
+              echo "Status message: $STATUS_MSG"
               echo "Full instance info:"
               echo "$INSTANCE_INFO" | jq '.'
               exit 1
