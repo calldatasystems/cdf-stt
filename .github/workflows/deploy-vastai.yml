@@ -86,17 +86,35 @@ jobs:
         id: search
         run: |
           echo "Searching for available RTX 4090 instances..."
-          vast search offers 'reliability > 0.95 num_gpus=1 disk_space >= 50 gpu_name=RTX_4090' --raw > offers.json
+          # Filter for hosts with good disk support (higher storage_cost indicates better disk support)
+          # Also require verified hosts and avoid very cheap storage (often problematic)
+          vast search offers 'reliability > 0.95 num_gpus=1 disk_space >= 50 gpu_name=RTX_4090 verification=verified storage_cost > 0.05' --raw > offers.json
 
           # Check if we got any results
           if [ ! -s offers.json ] || [ "$(cat offers.json)" = "[]" ]; then
             echo "No RTX 4090 instances available, searching for any RTX 40-series..."
-            vast search offers 'reliability > 0.95 num_gpus=1 disk_space >= 50 gpu_ram >= 16' --raw > offers.json
+            vast search offers 'reliability > 0.95 num_gpus=1 disk_space >= 50 gpu_ram >= 16 verification=verified storage_cost > 0.05' --raw > offers.json
           fi
 
-          # Get the cheapest offer
+          if [ ! -s offers.json ] || [ "$(cat offers.json)" = "[]" ]; then
+            echo "No instances with disk support found, relaxing storage_cost filter..."
+            vast search offers 'reliability > 0.95 num_gpus=1 disk_space >= 50 gpu_ram >= 16 verification=verified' --raw > offers.json
+          fi
+
+          # Get the cheapest offer (but now filtered for good disk support)
           OFFER_ID=$(jq -r 'sort_by(.dph_total) | .[0].id' offers.json)
+
+          if [ -z "$OFFER_ID" ] || [ "$OFFER_ID" = "null" ]; then
+            echo "ERROR: No suitable offers found"
+            exit 1
+          fi
+
           echo "Selected offer ID: $OFFER_ID"
+
+          # Show details of selected offer
+          echo "Selected offer details:"
+          jq -r --arg id "$OFFER_ID" '.[] | select(.id==($id|tonumber))' offers.json
+
           echo "offer_id=$OFFER_ID" >> $GITHUB_OUTPUT
 
       - name: Create or Update Instance
@@ -116,10 +134,11 @@ jobs:
 
           # Create instance with onstart command and port mapping
           # Port mapping via --env per Vast.ai documentation
-          # Note: --disk removed to avoid storage-opt errors on some hosts
+          # Disk parameter re-added - now searching for hosts with good storage support
           set +e  # Don't exit on error, capture it
           CREATE_OUTPUT=$(vast create instance ${{ steps.search.outputs.offer_id }} \
             --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            --disk 50 \
             --label cdf-stt-prod \
             --ssh \
             --env '-p 8000:8000/tcp -e WHISPER_MODEL_SIZE=large-v3 -e WHISPER_DEVICE=cuda -e WHISPER_COMPUTE_TYPE=float16 -e HF_TOKEN=${{ secrets.HF_TOKEN }}' \
@@ -168,7 +187,16 @@ jobs:
 
               # Check for known errors that indicate we should fail fast
               if echo "$STATUS_MSG" | grep -q "storage-opt"; then
-                echo "ERROR: Host has storage configuration issues"
+                echo "ERROR: Host has storage configuration issues (storage-opt)"
+                echo "Destroying instance and exiting - please retry (will select different host)"
+                vast destroy instance $INSTANCE_ID || true
+                exit 1
+              fi
+
+              # Check for docker build errors (usually disk space or network issues)
+              if echo "$STATUS_MSG" | grep -q "docker_build"; then
+                echo "ERROR: Docker build/pull failed on host"
+                echo "Possible causes: insufficient disk space, network issues, or image access"
                 echo "Destroying instance and exiting - please retry (will select different host)"
                 vast destroy instance $INSTANCE_ID || true
                 exit 1
