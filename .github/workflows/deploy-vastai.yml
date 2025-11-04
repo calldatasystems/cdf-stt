@@ -145,11 +145,11 @@ jobs:
             --disk 50 \
             --label cdf-stt-prod \
             --ssh \
-            --env "-p 8000:8000/tcp -e WHISPER_MODEL_SIZE=large-v3 -e WHISPER_DEVICE=cuda -e WHISPER_COMPUTE_TYPE=float16 -e HF_TOKEN=${HF_TOKEN_VALUE}" \
+            --env "-p 8000:8000" \
             --raw 2>&1)
 
-          # Note: --onstart-cmd removed due to ssh_proxy mode conflicts
-          # Service must be started manually after deployment
+          # Note: Environment variables (HF_TOKEN, etc) must be set manually via SSH
+          # Service must be started manually after deployment with proper env vars
           CREATE_EXIT_CODE=$?
           set -e  # Re-enable exit on error
 
