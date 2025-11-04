@@ -10,6 +10,9 @@ torchaudio==2.2.0
 # WhisperX for STT with diarization and alignment
 whisperx==3.1.1
 
+# faster-whisper (dependency of whisperx) - pin to compatible version
+faster-whisper==1.0.3
+
 # Diarization model (required by WhisperX)
 pyannote.audio==3.1.1
 
