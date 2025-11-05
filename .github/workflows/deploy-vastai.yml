@@ -1,9 +1,6 @@
 name: Deploy CDF STT (Vast.ai)
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 env:
