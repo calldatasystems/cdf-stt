@@ -4,26 +4,28 @@ uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 
 # PyTorch for CUDA support (required by whisperx and faster-whisper)
-torch==2.2.0
-torchaudio==2.2.0
+# whisperx 3.7.4 requires torch 2.8.0+
+torch>=2.8.0
+torchaudio>=2.8.0
 
 # WhisperX for STT with diarization and alignment
-whisperx==3.1.1
+whisperx==3.7.4
 
 # faster-whisper (dependency of whisperx) - let whisperx manage the version
-# Don't pin - whisperx will install compatible version
-faster-whisper>=1.0.3
+# whisperx 3.7.4 is compatible with faster-whisper 1.2.1+
+faster-whisper>=1.2.1
 
 # Diarization model (required by WhisperX)
-pyannote.audio==3.1.1
+# whisperx 3.7.4 is compatible with pyannote.audio 3.4.0+
+pyannote.audio>=3.4.0
 
 # Audio processing
 pydub==0.25.1
 librosa==0.10.1
 soundfile==0.12.1
 
-# NumPy - pin to 1.x for compatibility with audio processing libs
-numpy<2.0.0
+# NumPy - whisperx 3.7.4 requires numpy 2.x
+numpy>=2.0.0
 
 # Utilities
 python-dotenv==1.0.0
