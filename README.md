@@ -129,3 +129,4 @@ curl -X POST http://your-vastai-instance:8000/transcribe \
 
 MIT
 # Trigger deployment
+
