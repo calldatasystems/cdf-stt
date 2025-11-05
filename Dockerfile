@@ -1,7 +1,7 @@
 # CDF Speech-to-Text Service Dockerfile
 # Multi-stage build for WhisperX with CUDA support and Diarization
 
-FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu22.04 as base
+FROM nvidia/cuda:12.8.0-cudnn9-runtime-ubuntu22.04 as base
 
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
