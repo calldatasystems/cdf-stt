@@ -4,12 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'api/**'
-      - 'app/**'
-      - 'Dockerfile'
-      - 'requirements.txt'
-      - '.github/workflows/deploy-vastai.yml'
   workflow_dispatch:
 
 env:
