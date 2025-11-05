@@ -128,5 +128,5 @@ curl -X POST http://your-vastai-instance:8000/transcribe \
 ## License
 
 MIT
-# Trigger deployment
+# Trigger Docker rebuild - whisperx 3.7.4
 
