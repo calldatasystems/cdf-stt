@@ -1,7 +1,7 @@
 # CDF Speech-to-Text Service Dockerfile
 # Multi-stage build for WhisperX with CUDA support and Diarization
 
-FROM nvidia/cuda:12.8.0-cudnn9-runtime-ubuntu22.04 as base
+FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu22.04 as base
 
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
@@ -37,6 +37,7 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install Python dependencies
+# Note: torch 2.8+ will install its own CUDA runtime libraries (cuDNN 9) via pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
