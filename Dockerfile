@@ -6,6 +6,15 @@ FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu22.04 as base
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Install cuDNN 9 from NVIDIA repos
+RUN apt-get update && apt-get install -y wget gnupg && \
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    apt-get update && \
+    apt-get install -y libcudnn9-cuda-12 libcudnn9-dev-cuda-12 && \
+    rm -f cuda-keyring_1.1-1_all.deb && \
+    rm -rf /var/lib/apt/lists/*
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     python3.11 \
