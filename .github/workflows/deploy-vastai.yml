@@ -134,9 +134,10 @@ jobs:
           HF_TOKEN_VALUE="${{ secrets.HF_TOKEN }}"
 
           set +e  # Don't exit on error, capture it
+          # Note: --disk parameter removed as it causes storage-opt errors on many hosts
+          # Instances will use default disk allocation from host
           CREATE_OUTPUT=$(vast create instance ${{ steps.search.outputs.offer_id }} \
             --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            --disk 50 \
             --label cdf-stt-prod \
             --ssh \
             --env "-p 8000:8000" \
