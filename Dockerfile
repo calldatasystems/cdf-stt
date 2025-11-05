@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y wget gnupg && \
     wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb && \
     dpkg -i cuda-keyring_1.1-1_all.deb && \
     apt-get update && \
-    apt-get install -y libcudnn9-cuda-12 libcudnn9-dev-cuda-12 && \
+    apt-get install -y --allow-change-held-packages libcudnn9-cuda-12 libcudnn9-dev-cuda-12 && \
     rm -f cuda-keyring_1.1-1_all.deb && \
     rm -rf /var/lib/apt/lists/*
 
