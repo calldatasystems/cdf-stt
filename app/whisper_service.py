@@ -143,15 +143,27 @@ class WhisperSTTService:
                     diarize_segments = self.diarization_model(audio_path, **diarize_kwargs)
 
                     # Assign speakers to words
-                    result = whisperx.assign_word_speakers(diarize_segments, result)
+                    # whisperx.assign_word_speakers expects aligned_segments not the result dict
+                    result_with_speakers = whisperx.assign_word_speakers(diarize_segments, result)
+
+                    # Count unique speakers
+                    unique_speakers = set()
+                    if isinstance(result_with_speakers, dict) and "segments" in result_with_speakers:
+                        for seg in result_with_speakers["segments"]:
+                            if "speaker" in seg:
+                                unique_speakers.add(seg["speaker"])
+
+                    result = result_with_speakers
                     speakers_info = {
                         "enabled": True,
-                        "num_speakers": len(set([s['speaker'] for s in result.get("segments", []) if 'speaker' in s]))
+                        "num_speakers": len(unique_speakers)
                     }
                     logger.info(f"Diarization complete. Detected {speakers_info['num_speakers']} speakers")
 
                 except Exception as e:
+                    import traceback
                     logger.error(f"Diarization failed: {e}")
+                    logger.error(f"Traceback: {traceback.format_exc()}")
                     speakers_info = {"enabled": False, "error": str(e)}
             elif enable_diarization and not self.hf_token:
                 speakers_info = {"enabled": False, "error": "HF_TOKEN not set"}
