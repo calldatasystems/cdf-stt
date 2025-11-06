@@ -142,17 +142,24 @@ class WhisperSTTService:
 
                     diarize_segments = self.diarization_model(audio_path, **diarize_kwargs)
 
+                    # Convert pyannote Annotation to DataFrame format expected by whisperx
+                    import pandas as pd
+                    diarize_df = pd.DataFrame([
+                        {"start": segment.start, "end": segment.end, "speaker": speaker}
+                        for segment, _, speaker in diarize_segments.itertracks(yield_label=True)
+                    ])
+
                     # Assign speakers to words
-                    # whisperx.assign_word_speakers expects aligned_segments not the result dict
-                    result_with_speakers = whisperx.assign_word_speakers(diarize_segments, result)
+                    # whisperx.assign_word_speakers expects (diarization_df, aligned_segments)
+                    result_with_speakers = whisperx.assign_word_speakers(diarize_df, result)
 
-                    # Count unique speakers
+                    # Count unique speakers from segments
                     unique_speakers = set()
-                    if isinstance(result_with_speakers, dict) and "segments" in result_with_speakers:
-                        for seg in result_with_speakers["segments"]:
-                            if "speaker" in seg:
-                                unique_speakers.add(seg["speaker"])
+                    for seg in result_with_speakers.get("segments", []):
+                        if "speaker" in seg:
+                            unique_speakers.add(seg["speaker"])
 
+                    # Update result with speaker info
                     result = result_with_speakers
                     speakers_info = {
                         "enabled": True,
