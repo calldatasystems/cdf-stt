@@ -35,3 +35,6 @@ pydantic-settings==2.1.0
 # Monitoring and logging
 prometheus-client==0.19.0
 
+# Redis for job queue
+redis==5.0.1
+

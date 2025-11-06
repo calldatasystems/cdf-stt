@@ -7,6 +7,7 @@ import os
 import logging
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -18,6 +19,7 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 from fastapi import Response
 
 from app.whisper_service import WhisperSTTService
+from app.job_queue import JobQueue, JobStatus
 
 # Configure logging
 logging.basicConfig(
@@ -51,6 +53,9 @@ audio_duration = Histogram('audio_duration_seconds', 'Duration of audio files pr
 # Global STT service instance
 stt_service: Optional[WhisperSTTService] = None
 
+# Global job queue instance
+job_queue: Optional[JobQueue] = None
+
 
 class TranscriptionResponse(BaseModel):
     """Response model for transcription"""
@@ -73,8 +78,8 @@ class HealthResponse(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize STT service on startup"""
-    global stt_service
+    """Initialize STT service and job queue on startup"""
+    global stt_service, job_queue
 
     model_size = os.getenv("WHISPER_MODEL_SIZE", "large-v3")
     device = os.getenv("WHISPER_DEVICE", "cuda")
@@ -91,6 +96,22 @@ async def startup_event():
         logger.info("STT service initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize STT service: {e}")
+        raise
+
+    # Initialize job queue
+    redis_host = os.getenv("REDIS_HOST", "localhost")
+    redis_port = int(os.getenv("REDIS_PORT", "6379"))
+    redis_password = os.getenv("REDIS_PASSWORD")
+
+    try:
+        job_queue = JobQueue(
+            redis_host=redis_host,
+            redis_port=redis_port,
+            redis_password=redis_password
+        )
+        logger.info("Job queue initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize job queue: {e}")
         raise
 
 
@@ -226,6 +247,161 @@ async def transcribe_audio(
                 os.unlink(temp_file_path)
             except Exception as e:
                 logger.warning(f"Failed to delete temp file {temp_file_path}: {e}")
+
+
+# ============================================================================
+# Async Job-based Transcription Endpoints
+# ============================================================================
+
+@app.post("/transcribe/async", tags=["Async Transcription"])
+async def transcribe_audio_async(
+    file: UploadFile = File(..., description="Audio file (wav, mp3, flac, etc.)"),
+    language: Optional[str] = Form(None, description="Language code (e.g., 'en', 'es'). Auto-detect if not provided"),
+    task: str = Form("transcribe", description="Task: 'transcribe' or 'translate' (to English)"),
+    beam_size: int = Form(5, description="Beam size for decoding (1-10)"),
+    vad_filter: bool = Form(True, description="Use voice activity detection to filter silence"),
+    word_timestamps: bool = Form(False, description="Include word-level timestamps"),
+    enable_diarization: bool = Form(False, description="Enable speaker diarization (requires HF_TOKEN)"),
+    min_speakers: Optional[int] = Form(None, description="Minimum number of speakers for diarization"),
+    max_speakers: Optional[int] = Form(None, description="Maximum number of speakers for diarization")
+):
+    """
+    Submit audio for async transcription - returns immediately with job_id
+
+    Use GET /jobs/{job_id} to check status and retrieve results
+    """
+    if job_queue is None:
+        raise HTTPException(status_code=503, detail="Job queue not initialized")
+
+    # Validate parameters
+    if task not in ["transcribe", "translate"]:
+        raise HTTPException(status_code=400, detail="Task must be 'transcribe' or 'translate'")
+    if not 1 <= beam_size <= 10:
+        raise HTTPException(status_code=400, detail="Beam size must be between 1 and 10")
+
+    try:
+        # Save uploaded file to permanent temp location (worker will delete it)
+        temp_dir = Path("/tmp/stt_jobs")
+        temp_dir.mkdir(exist_ok=True)
+
+        temp_file_path = temp_dir / f"{uuid.uuid4()}{Path(file.filename).suffix}"
+
+        with open(temp_file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+
+        # Create job
+        params = {
+            "language": language,
+            "task": task,
+            "beam_size": beam_size,
+            "vad_filter": vad_filter,
+            "word_timestamps": word_timestamps,
+            "enable_diarization": enable_diarization,
+            "min_speakers": min_speakers,
+            "max_speakers": max_speakers,
+            "original_filename": file.filename
+        }
+
+        job_id = job_queue.create_job(
+            audio_path=str(temp_file_path),
+            params=params
+        )
+
+        logger.info(f"Created async job {job_id} for {file.filename}")
+
+        return {
+            "job_id": job_id,
+            "status": "queued",
+            "message": "Job created successfully. Use GET /jobs/{job_id} to check status."
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to create async job: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create job: {str(e)}")
+
+
+@app.get("/jobs/{job_id}", tags=["Async Transcription"])
+async def get_job_status(job_id: str):
+    """
+    Get status and result of async transcription job
+
+    Status values:
+    - queued: Job is waiting to be processed
+    - processing: Job is currently being transcribed
+    - completed: Job finished successfully (result included)
+    - failed: Job failed (error message included)
+    """
+    if job_queue is None:
+        raise HTTPException(status_code=503, detail="Job queue not initialized")
+
+    job = job_queue.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    # Build response
+    response = {
+        "job_id": job_id,
+        "status": job.get("status"),
+        "progress": job.get("progress", 0),
+        "created_at": job.get("created_at"),
+        "started_at": job.get("started_at"),
+        "completed_at": job.get("completed_at")
+    }
+
+    # Add result if completed
+    if job.get("status") == JobStatus.COMPLETED and job.get("result"):
+        response["result"] = job["result"]
+
+    # Add error if failed
+    if job.get("status") == JobStatus.FAILED and job.get("error"):
+        response["error"] = job.get("error")
+
+    return response
+
+
+@app.get("/jobs", tags=["Async Transcription"])
+async def list_jobs(
+    status: Optional[str] = None,
+    limit: int = 100
+):
+    """
+    List transcription jobs with optional status filter
+
+    Query parameters:
+    - status: Filter by status (queued, processing, completed, failed)
+    - limit: Maximum number of jobs to return (default: 100)
+    """
+    if job_queue is None:
+        raise HTTPException(status_code=503, detail="Job queue not initialized")
+
+    try:
+        job_status = JobStatus(status) if status else None
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be one of: queued, processing, completed, failed"
+        )
+
+    jobs = job_queue.list_jobs(status=job_status, limit=limit)
+
+    return {
+        "jobs": jobs,
+        "count": len(jobs)
+    }
+
+
+@app.get("/queue/stats", tags=["Async Transcription"])
+async def get_queue_stats():
+    """Get queue statistics"""
+    if job_queue is None:
+        raise HTTPException(status_code=503, detail="Job queue not initialized")
+
+    return {
+        "queue_length": job_queue.get_queue_length(),
+        "redis_healthy": job_queue.health_check()
+    }
 
 
 if __name__ == "__main__":
