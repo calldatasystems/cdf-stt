@@ -351,11 +351,11 @@ async def get_job_status(job_id: str):
     }
 
     # Add result if completed
-    if job.get("status") == JobStatus.COMPLETED and job.get("result"):
+    if job.get("status") == str(JobStatus.COMPLETED) and job.get("result"):
         response["result"] = job["result"]
 
     # Add error if failed
-    if job.get("status") == JobStatus.FAILED and job.get("error"):
+    if job.get("status") == str(JobStatus.FAILED) and job.get("error"):
         response["error"] = job.get("error")
 
     return response
