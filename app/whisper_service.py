@@ -9,6 +9,7 @@ from typing import Optional, List, Dict, Any
 from pathlib import Path
 import torch
 import whisperx
+from pyannote.audio import Pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -126,23 +127,26 @@ class WhisperSTTService:
                 try:
                     # Load diarization model (lazy loading)
                     if self.diarization_model is None:
-                        self.diarization_model = whisperx.DiarizationPipeline(
-                            use_auth_token=self.hf_token,
-                            device=self.device
+                        self.diarization_model = Pipeline.from_pretrained(
+                            "pyannote/speaker-diarization-3.1",
+                            use_auth_token=self.hf_token
                         )
+                        self.diarization_model.to(torch.device(self.device))
 
                     # Perform diarization
-                    diarize_segments = self.diarization_model(
-                        audio,
-                        min_speakers=min_speakers,
-                        max_speakers=max_speakers
-                    )
+                    diarize_kwargs = {}
+                    if min_speakers is not None:
+                        diarize_kwargs["min_speakers"] = min_speakers
+                    if max_speakers is not None:
+                        diarize_kwargs["max_speakers"] = max_speakers
+
+                    diarize_segments = self.diarization_model(audio_path, **diarize_kwargs)
 
                     # Assign speakers to words
                     result = whisperx.assign_word_speakers(diarize_segments, result)
                     speakers_info = {
                         "enabled": True,
-                        "num_speakers": len(set([s['speaker'] for s in diarize_segments.itertracks(yield_label=True)]))
+                        "num_speakers": len(set([s['speaker'] for s in result.get("segments", []) if 'speaker' in s]))
                     }
                     logger.info(f"Diarization complete. Detected {speakers_info['num_speakers']} speakers")
 
