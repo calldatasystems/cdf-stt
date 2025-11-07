@@ -125,13 +125,23 @@ echo "======================================"
 
 echo ""
 echo "Testing health endpoint..."
-sleep 2
-curl -s http://localhost:8000/health | python3 -m json.tool
+sleep 5
+HEALTH_RESPONSE=$(curl -s http://localhost:8000/health)
+if [ -n "$HEALTH_RESPONSE" ]; then
+    echo "$HEALTH_RESPONSE" | python3 -m json.tool 2>/dev/null || echo "$HEALTH_RESPONSE"
+else
+    echo "⚠ API not responding yet. Check logs with: tail -f /tmp/api.log"
+fi
 
 echo ""
 echo ""
 echo "Testing queue stats..."
-curl -s http://localhost:8000/queue/stats | python3 -m json.tool
+QUEUE_RESPONSE=$(curl -s http://localhost:8000/queue/stats)
+if [ -n "$QUEUE_RESPONSE" ]; then
+    echo "$QUEUE_RESPONSE" | python3 -m json.tool 2>/dev/null || echo "$QUEUE_RESPONSE"
+else
+    echo "⚠ Queue stats not available yet"
+fi
 
 echo ""
 echo "======================================"
