@@ -30,6 +30,8 @@ RUN apt-get update && apt-get install -y \
     libswresample-dev \
     pkg-config \
     build-essential \
+    redis-server \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Python 3.11 as default
@@ -52,17 +54,21 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY api/ ./api/
 COPY app/ ./app/
+COPY start_stt_service.sh ./start_stt_service.sh
+RUN chmod +x ./start_stt_service.sh
 
 # Create directory for model cache
 RUN mkdir -p /root/.cache/huggingface
+
+# Accept HF_TOKEN as build argument
+ARG HF_TOKEN
+ENV HF_TOKEN=${HF_TOKEN}
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
 ENV WHISPER_MODEL_SIZE=large-v3
 ENV WHISPER_DEVICE=cuda
 ENV WHISPER_COMPUTE_TYPE=float16
-# Set HF_TOKEN via docker run -e HF_TOKEN=your_token or docker-compose
-ENV HF_TOKEN=""
 
 # Expose API port
 EXPOSE 8000

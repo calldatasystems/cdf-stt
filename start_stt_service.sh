@@ -11,16 +11,20 @@ echo "CDF STT Service Startup"
 echo "======================================"
 
 # Environment variables
-# HF_TOKEN should be set before running this script or passed as argument
+# HF_TOKEN is embedded in the Docker image during build
+# If not set, check for argument or exit with error
 if [ -z "$HF_TOKEN" ]; then
     if [ -n "$1" ]; then
         export HF_TOKEN="$1"
+        echo "⚠ Using HF_TOKEN from command line argument"
     else
         echo "ERROR: HF_TOKEN not set!"
-        echo "Usage: $0 <hf_token>"
-        echo "   or: HF_TOKEN=<token> $0"
+        echo "This should be embedded in the Docker image."
+        echo "If running manually, use: $0 <hf_token>"
         exit 1
     fi
+else
+    echo "✓ Using HF_TOKEN from Docker image"
 fi
 
 export LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH

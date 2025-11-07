@@ -53,6 +53,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
+          build-args: |
+            HF_TOKEN=${{ secrets.HF_TOKEN }}
 
       - name: Deployment Instructions
         run: |
@@ -62,15 +64,19 @@ jobs:
           echo ""
           echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
           echo ""
-          echo "To deploy manually on Vast.ai:"
+          echo "HF_TOKEN embedded from GitHub secret ✓"
+          echo ""
+          echo "To deploy on Vast.ai:"
           echo "1. Create instance with image: ghcr.io/calldatasystems/cdf-stt:latest"
           echo "2. SSH into instance"
-          echo "3. Start service:"
-          echo "   export HF_TOKEN=<your_huggingface_token>"
-          echo "   export WHISPER_MODEL_SIZE=large-v3"
-          echo "   export WHISPER_DEVICE=cuda"
-          echo "   export WHISPER_COMPUTE_TYPE=float16"
+          echo "3. Run startup script:"
           echo "   cd /app"
-          echo "   nohup uvicorn api.main:app --host 0.0.0.0 --port 8000 > /tmp/stt.log 2>&1 &"
+          echo "   ./start_stt_service.sh"
+          echo ""
+          echo "The script will automatically:"
+          echo "  - Start Redis server"
+          echo "  - Start API on port 8000"
+          echo "  - Start background worker"
+          echo "  - Show external API URL"
           echo ""
           echo "=================================================="
